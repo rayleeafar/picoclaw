@@ -170,10 +170,10 @@ func ParseResponse(body io.Reader) (*LLMResponse, error) {
 	var apiResponse struct {
 		Choices []struct {
 			Message struct {
-				Content          string            `json:"content"`
-				ReasoningContent string            `json:"reasoning_content"`
-				Reasoning        string            `json:"reasoning"`
-				ReasoningDetails []ReasoningDetail `json:"reasoning_details"`
+				Content          string          `json:"content"`
+				ReasoningContent string          `json:"reasoning_content"`
+				Reasoning        string          `json:"reasoning"`
+				ReasoningDetails json.RawMessage `json:"reasoning_details"`
 				ToolCalls        []struct {
 					ID       string `json:"id"`
 					Type     string `json:"type"`
@@ -239,11 +239,32 @@ func ParseResponse(body io.Reader) (*LLMResponse, error) {
 		toolCalls = append(toolCalls, toolCall)
 	}
 
+	var reasoningDetails []ReasoningDetail
+	if len(choice.Message.ReasoningDetails) > 0 {
+		rawData := bytes.TrimSpace(choice.Message.ReasoningDetails)
+		if len(rawData) > 0 {
+			if rawData[0] == '[' {
+				_ = json.Unmarshal(rawData, &reasoningDetails)
+			} else if rawData[0] == '{' {
+				// Just try to parse as single ReasoningDetail
+				var r ReasoningDetail
+				if err := json.Unmarshal(rawData, &r); err == nil {
+					reasoningDetails = append(reasoningDetails, r)
+				} else {
+					reasoningDetails = append(reasoningDetails, ReasoningDetail{
+						Type: "raw",
+						Text: string(rawData),
+					})
+				}
+			}
+		}
+	}
+
 	return &LLMResponse{
 		Content:          choice.Message.Content,
 		ReasoningContent: choice.Message.ReasoningContent,
 		Reasoning:        choice.Message.Reasoning,
-		ReasoningDetails: choice.Message.ReasoningDetails,
+		ReasoningDetails: reasoningDetails,
 		ToolCalls:        toolCalls,
 		FinishReason:     normalizeFinishReason(choice.FinishReason),
 		Usage:            apiResponse.Usage,
